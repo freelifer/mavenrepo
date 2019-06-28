@@ -1,0 +1,46 @@
+apply plugin: 'java-gradle-plugin'
+apply plugin: 'kotlin'
+
+gradlePlugin {
+    plugins {
+        shadow {
+            id = "mavenrepo"
+            implementationClass = "freelifer.gradle.plugin._MavenRepoPlugin"
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation "com.android.tools.build:gradle:$build_gradle_version"
+}
+
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.6"
+    }
+}
+
+compileTestKotlin {
+    kotlinOptions {
+        jvmTarget = "1.6"
+    }
+}
+
+apply plugin: 'maven'
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            //设置插件的GAV参数
+            pom.groupId = 'freelifer.plugin'
+            pom.artifactId = 'mavenrepo'
+            pom.version = '1.0.0'
+            //文件发布到下面目录
+            repository(url: uri('../repo'))
+        }
+    }
+}
+
+//-----------
+apply from: rootProject.file('gradle/bintray.gradle')
