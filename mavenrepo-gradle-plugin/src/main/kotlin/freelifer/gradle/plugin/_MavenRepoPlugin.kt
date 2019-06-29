@@ -1,70 +1,68 @@
 package freelifer.gradle.plugin
 
+import com.android.build.gradle.AndroidConfig
 import org.codehaus.groovy.runtime.ResourceGroovyMethods
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import java.io.File
 import java.util.*
 import kotlin.collections.ArrayList
+
+private val Project.android: AndroidConfig
+    get() {
+        return extensions.run {
+            findByName("android") as AndroidConfig
+        }
+    }
+
+private val Project.mavenrepo: MavenRepo
+    get() {
+        return extensions.run {
+            create<MavenRepo>("mavenrepo", MavenRepo::class.java)
+        }
+    }
 
 /**
  * @author zhukun on 2019-06-28.
  */
 class _MavenRepoPlugin : Plugin<Project> {
     override fun apply(project: Project) {
-//        val extension = project.extensions.create<MavenRepo>("xxx")
-        val extension = project.extensions.create<MavenRepo>("mavenrepo", MavenRepo::class.java)
+        val mavenrepo = project.mavenrepo
 
         val mavenRepoTask = project.task("MavenRepo").doLast {
             val startTime = System.currentTimeMillis()
-
-            if (!verifyParameter(project, extension)) {
+            if (!verifyParameter(project, mavenrepo)) {
                 println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
                 return@doLast
             }
 
             val distPath = project.rootDir.path + File.separator + "dist"
-            clearDistPath(distPath)
+            delDir(distPath)
 
             val buildPath = project.buildDir.path
             val aarDir = File(buildPath + File.separator + "outputs" + File.separator + "aar")
-            val fileArray = ArrayList<String>()
+            var arrFilePath = ""
+            var lastModifyMaxTime = 0L
             if (aarDir.exists()) {
                 val paths = aarDir.listFiles().toList()
                 paths.forEach { file ->
-                    fileArray.add(file.getAbsolutePath())
+                    val lastModifyTime = file.lastModified()
+                    if (lastModifyMaxTime < lastModifyTime) {
+                        lastModifyMaxTime = lastModifyTime
+                        arrFilePath = file.absolutePath
+                    }
                 }
             }
-            if (fileArray.isEmpty()) {
+            if (arrFilePath.isEmpty()) {
                 warn(project, "======>>maven repo not found aar file.")
                 println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
                 return@doLast
             }
-            if (fileArray.size > 1) {
-                warn(project, "======>>maven repo not support multiple aar file.")
-                println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
-                return@doLast
-            }
 
-            fileArray.forEach { path ->
-                project.copy {
-                    from path
-                            into distPath
-                            println "copy aar from ${path} to ${distPath}:"
-                }
-            }
-
-            val file = File(fileArray.get(0))
-            createPom(project, distPath, file.getName())
-
-            // provided compileOnly
-            println("===========>>>>>>>>>>>>>>>>>>>>ShadowPlugin ${project.dependencies.javaClass.toString()}")
-//            project.extensions.create("mavenrepo", MavenRepo::class.java)
-
-            println(">>> ${extension.ignore.toString()}")
-            val dependencies = runtimeDependencies(project)
+            val file = File(arrFilePath)
+            file.copyTo(File(distPath, file.name), true)
+            createPom(project, mavenrepo, distPath, file.name)
 
             println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
         }
@@ -77,34 +75,39 @@ class _MavenRepoPlugin : Plugin<Project> {
     }
 
 
-    private fun createPom(project: Project, distPath: String, arrName: String) {
-        val dependencies = runtimeDependencies(project)
+    private fun createPom(project: Project, mavenrepo: MavenRepo, distPath: String, arrName: String) {
+        val dependencies = runtimeDependencies(project, mavenrepo)
 
-        val groupId = project.mavenrepo.groupId
+        val groupId = mavenrepo.groupId
         Objects.requireNonNull(groupId, "======>>maven repo not found mavenrepo.groupId")
-        val artifactId = project.mavenrepo.artifactId
-        Objects.requireNonNull(artifactId, "======>>maven repo not found mavenrepo.artifactId")
-        val repositoryId = project.mavenrepo.repositoryId
+//        val artifactId = mavenrepo.artifactId
+//        Objects.requireNonNull(artifactId, "======>>maven repo not found mavenrepo.artifactId")
+        val repositoryId = mavenrepo.repositoryId
         Objects.requireNonNull(repositoryId, "======>>maven repo not found mavenrepo.repositoryId")
-        val url = project.mavenrepo.url
+        val url = mavenrepo.url
         Objects.requireNonNull(url, "======>>maven repo not found mavenrepo.url")
 
-        val version = isBlank(project.mavenrepo.version) ? project.android.defaultConfig.versionName : project.mavenrepo.version
-        val mvn = isBlank(project.mavenrepo.cmd) ? "mvn" : project.mavenrepo.cmd
+        val artifactId = if (isBlank(mavenrepo.artifactId)) project.name else mavenrepo.artifactId
+        val version = if (isBlank(mavenrepo.version)) project.android.defaultConfig.versionName else mavenrepo.version
+        val mvn = if (isBlank(mavenrepo.cmd)) "mvn" else mavenrepo.cmd
 
-        val pom = createPom(groupId, artifactId, version, dependencies.toString())
+        val pom = createPom(groupId, artifactId, version, dependencies)
 //        println("=====>>>>>>>>")
 //        println("$pom")
 
         writeToFile(distPath, "pom.xml", pom)
 
-        val shell = "${mvn} deploy:deploy-file -DgroupId=${groupId} -DartifactId=${artifactId} -Dversion=${version} -Dpackaging=aar -Dfile=${arrName} -DpomFile=pom.xml -DrepositoryId=${repositoryId} -Durl=${url}"
+        val shell = "$mvn deploy:deploy-file -DgroupId=$groupId -DartifactId=$artifactId -Dversion=$version -Dpackaging=aar -Dfile=$arrName -DpomFile=pom.xml -DrepositoryId=$repositoryId -Durl=$url"
         writeToFile(distPath, "maven_upload.sh", shell)
     }
 
-    private fun runtimeDependencies(project: Project): String {
+    private fun runtimeDependencies(project: Project, mavenrepo: MavenRepo): String {
         val runtimeDependencies = StringBuilder("")
         val ignoreDependencies = ignoreDependencies(project)
+        val ignoreExtensions = ignoreExtensions(mavenrepo)
+        val ignore = ArrayList<Dependency>()
+        ignore.addAll(ignoreDependencies)
+        ignore.addAll(ignoreExtensions)
 
         val configuration: Configuration = try {
             // 3.x
@@ -116,7 +119,7 @@ class _MavenRepoPlugin : Plugin<Project> {
         configuration.resolvedConfiguration.lenientConfiguration.firstLevelModuleDependencies.forEach {
             val identifier = it.module.id
             println("${identifier.group}:${identifier.name}:${identifier.version}")
-            if (!findModuleFromIgnoreDependencies(ignoreDependencies, identifier.group, identifier.name)) {
+            if (!findModuleFromIgnoreDependencies(ignore, identifier.group, identifier.name)) {
                 runtimeDependencies.append(createDependency(identifier.group, identifier.name, identifier.version))
             }
         }
@@ -173,26 +176,27 @@ class _MavenRepoPlugin : Plugin<Project> {
     }
 
     /**
-     * com.android.support:appcompat-v7
-     * com.android.support
-     * :appcompat-v7
+     * com.android.support:appcompat-v7 y
+     * com.android.support y
+     * :appcompat-v7 x
      */
     private fun ignoreExtensions(mavenRepo: MavenRepo): List<Dependency> {
         val result = ArrayList<Dependency>()
-        if (!mavenRepo.ignore.isEmpty()) {
-            val split = mavenRepo.ignore.split(",")
-            if (split.isNotEmpty()) {
-                for (m in split) {
-                    if (m.isNotEmpty()) {
-                        val moduleSplit = m.split(":")
-                        if (moduleSplit.size == 1) {
-                            result.add(Dependency(moduleSplit[0], ""))
-                        } else if (moduleSplit.size == 2) {
-                            if (moduleSplit[0].isNotEmpty()) {
-                                result.add(Dependency(moduleSplit[0], moduleSplit[1]))
-                            } else {
-                                // Not Support group Empty!!!
-                            }
+
+        if (mavenRepo.ignore.isNotEmpty()) {
+            for (m in mavenRepo.ignore) {
+                if (m.isNotEmpty()) {
+                    println("ignoreExtensions: $m")
+                    val moduleSplit = m.split(":")
+                    if (moduleSplit.size == 1) {
+                        result.add(Dependency(moduleSplit[0], ""))
+//                        println("ignoreExtensions: $moduleSplit[0]:")
+                    } else if (moduleSplit.size == 2) {
+                        if (moduleSplit[0].isNotEmpty()) {
+                            result.add(Dependency(moduleSplit[0], moduleSplit[1]))
+//                            println("ignoreExtensions: $moduleSplit[0]:${moduleSplit[1]}")
+                        } else {
+                            // Not Support group Empty!!!
                         }
                     }
                 }
@@ -204,23 +208,23 @@ class _MavenRepoPlugin : Plugin<Project> {
 
     private fun verifyParameter(project: Project, mavenrepo: MavenRepo): Boolean {
         val groupId = mavenrepo.groupId
-        if (groupId.length <= 0) {
+        if (groupId.isEmpty()) {
             warn(project, "======>>maven repo not found mavenrepo.groupId")
             return false
         }
-
-        val artifactId = mavenrepo.artifactId
-        if (artifactId.length <= 0) {
-            warn(project, "======>>maven repo not found mavenrepo.artifactId")
-            return false
-        }
+//
+//        val artifactId = mavenrepo.artifactId
+//        if (artifactId.isEmpty()) {
+//            warn(project, "======>>maven repo not found mavenrepo.artifactId")
+//            return false
+//        }
         val repositoryId = mavenrepo.repositoryId
-        if (repositoryId.length <= 0) {
+        if (repositoryId.isEmpty()) {
             warn(project, "======>>maven repo not found mavenrepo.repositoryId")
             return false
         }
         val url = mavenrepo.url
-        if (url.length <= 0) {
+        if (url.isEmpty()) {
             warn(project, "======>>maven repo not found mavenrepo.url")
             return false
         }
@@ -274,13 +278,16 @@ class _MavenRepoPlugin : Plugin<Project> {
 
     private fun writeToFile(distPath: String, filename: String, content: String) {
         val file = File(distPath, filename)
-        if (file.exists()) {
-            file.delete()
+        file.printWriter().use { out ->
+            out.print(content)
         }
-        val out = ResourceGroovyMethods.newPrintWriter(file)
-        out.write(content)
-        out.flush()
-        out.close()
+//        if (file.exists()) {
+//            file.delete()
+//        }
+//        val out = ResourceGroovyMethods.newPrintWriter(file)
+//        out.write(content)
+//        out.flush()
+//        out.close()
     }
 
     private fun clearDistPath(distPath: String) {
@@ -291,16 +298,36 @@ class _MavenRepoPlugin : Plugin<Project> {
     }
 
     private fun isBlank(str: String): Boolean {
-        if (false || str.trim().equals("") || str.trim().equalsIgnoreCase("null")) {
+        if (str.trim() == "" || str.trim().equals("null", ignoreCase = true)) {
             return true
         }
         return false
     }
 
     private fun warn(project: Project, msg: String) {
-        project.getLogger().warn(msg)
+        project.logger.warn(msg)
     }
 
+    private fun delDir(dirpath: String) {
+        val dir = File(dirpath)
+        deleteDirWithFile(dir)
+    }
+
+    private fun deleteDirWithFile(dir: File?) {
+        if (dir!!.checkFile())
+            return
+        for (file in dir.listFiles()) {
+            if (file.isFile)
+                file.delete() // 删除所有文件
+            else if (file.isDirectory)
+                deleteDirWithFile(file) // 递规的方式删除文件夹
+        }
+        dir.delete()// 删除目录本身
+    }
+
+    private fun File.checkFile(): Boolean {
+        return this == null || !this.exists() || !this.isDirectory
+    }
 }
 
 open class Dependency(var group: String, var name: String)
@@ -312,5 +339,5 @@ open class MavenRepo {
     var cmd: String = ""
     var repositoryId: String = ""
     var url: String = ""
-    var ignore: String = ""
+    var ignore: ArrayList<String> = ArrayList()
 }
