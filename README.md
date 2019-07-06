@@ -8,7 +8,7 @@
 #### 1. 在项目下的build.gradle添加代码
 
 ```
-classpath 'freelifer.gradle.plugin:mavenrepo-gradle-plugin:1.0.0'
+classpath 'freelifer.gradle.plugin:mavenrepo-gradle-plugin:1.0.1'
 ```
 
 #### 2. 在module下的build.gradle添加代码
