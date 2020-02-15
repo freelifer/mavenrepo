@@ -92,13 +92,16 @@ class _MavenRepoPlugin : Plugin<Project> {
         val mvn = if (isBlank(mavenrepo.cmd)) "mvn" else mavenrepo.cmd
 
         val pom = createPom(groupId, artifactId, version, dependencies)
-//        println("=====>>>>>>>>")
-//        println("$pom")
-
         writeToFile(distPath, "pom.xml", pom)
 
         val shell = "$mvn deploy:deploy-file -DgroupId=$groupId -DartifactId=$artifactId -Dversion=$version -Dpackaging=aar -Dfile=$arrName -DpomFile=pom.xml -DrepositoryId=$repositoryId -Durl=$url"
         writeToFile(distPath, "maven_upload.sh", shell)
+
+        val snapshotPom = createPom(groupId, artifactId, "$version-SNAPSHOT", dependencies)
+        writeToFile(distPath, "pom_SNAPSHOT.xml", snapshotPom)
+
+        val snapshotShell = "$mvn deploy:deploy-file -DgroupId=$groupId -DartifactId=$artifactId -Dversion=$version-SNAPSHOT -Dpackaging=aar -Dfile=$arrName -DpomFile=pom_SNAPSHOT.xml -DrepositoryId=$repositoryId -Durl=$url"
+        writeToFile(distPath, "maven_upload-SNAPSHOT.sh", snapshotShell)
     }
 
     private fun runtimeDependencies(project: Project, mavenrepo: MavenRepo): String {
