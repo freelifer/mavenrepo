@@ -1,0 +1,20 @@
+apply plugin: 'com.novoda.bintray-release'
+
+group = GROUP
+version = VERSION_NAME
+description = POM_DESCRIPTION
+
+Properties properties = new Properties()
+properties.load(project.rootProject.file('local.properties').newDataInputStream())
+
+publish {
+    userOrg = "freelifer"
+    groupId = group
+    artifactId = "mavenrepo-gradle-plugin"
+    publishVersion = VERSION_NAME
+    desc = description
+    website = POM_URL
+    bintrayUser = properties.getProperty("bintray.user")
+    bintrayKey = properties.getProperty("bintray.apikey")
+    dryRun = false
+}

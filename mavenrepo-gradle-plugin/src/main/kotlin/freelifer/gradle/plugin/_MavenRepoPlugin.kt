@@ -37,7 +37,7 @@ class _MavenRepoPlugin : Plugin<Project> {
                 return@doLast
             }
 
-            val distPath = project.rootDir.path + File.separator + "dist"
+            val distPath = project.rootDir.path + File.separator + mavenrepo.dist
             delDir(distPath)
 
             val buildPath = project.buildDir.path
@@ -339,6 +339,7 @@ open class MavenRepo {
     var groupId: String = ""
     var artifactId: String = ""
     var version: String = ""
+    var dist: String = "dist"
     var cmd: String = ""
     var repositoryId: String = ""
     var url: String = ""
