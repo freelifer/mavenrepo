@@ -1,13 +1,14 @@
 package freelifer.gradle.plugin
 
 import com.android.build.gradle.AndroidConfig
-import org.codehaus.groovy.runtime.ResourceGroovyMethods
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import java.io.File
 import java.util.*
 import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 
 private val Project.android: AndroidConfig
     get() {
@@ -30,7 +31,34 @@ class _MavenRepoPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val mavenrepo = project.mavenrepo
 
-        val mavenRepoTask = project.task("MavenRepo").doLast {
+        val map = HashMap<String, String>()
+        map[Task.TASK_GROUP] = "mavenrepo"
+
+        val upload = project.task(map, "upload")
+        upload.description = "upload maven repo"
+        upload.dependsOn("assembleRelease")
+        upload.doLast {
+            val distFile = File(project.rootDir.path + File.separator + mavenrepo.dist)
+            if (!distFile.exists()) {
+                println("======>>mavenRepoTask upload error, ${distFile.absolutePath} not exists")
+                return@doLast
+            }
+            project.exec {
+                it.workingDir = distFile
+                var commands = ArrayList<String>()
+                if (System.getProperty("os.name").toLowerCase().startsWith("windows")) {
+                    commands.add("cmd")
+                    commands.add("/c")
+                } else {
+                    commands.add("bash")
+                    commands.add("-c")
+                }
+                commands.add("chmod +x maven_upload.sh && ./maven_upload.sh")
+                it.commandLine = commands
+            }
+        }
+
+        val mavenRepoTask = project.task(map, "mavenrepo").doLast {
             val startTime = System.currentTimeMillis()
             if (!verifyParameter(project, mavenrepo)) {
                 println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
@@ -62,6 +90,10 @@ class _MavenRepoPlugin : Plugin<Project> {
 
             val file = File(arrFilePath)
             file.copyTo(File(distPath, file.name), true)
+
+            val mappingDir = File(buildPath + File.separator + "outputs" + File.separator + "mapping" + File.separator + "release")
+            copyMapping(mappingDir, File(distPath))
+
             createPom(project, mavenrepo, distPath, file.name)
 
             println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
@@ -74,6 +106,17 @@ class _MavenRepoPlugin : Plugin<Project> {
         }
     }
 
+    private fun copyMapping(src: File, dst: File) {
+        if (!src.exists()) {
+            return
+        }
+        if (!dst.exists()) {
+            dst.mkdirs()
+        }
+        src.listFiles()?.forEach {
+            it.copyTo(File(dst, it.name), true)
+        }
+    }
 
     private fun createPom(project: Project, mavenrepo: MavenRepo, distPath: String, arrName: String) {
         val dependencies = runtimeDependencies(project, mavenrepo)
@@ -278,6 +321,42 @@ class _MavenRepoPlugin : Plugin<Project> {
 """
     }
 
+    open fun createMavenShell(): String {
+        return """
+mvn deploy:deploy-file -DgroupId=com.dotc.sdk -DartifactId=monsdk-cn-model -Dversion=1.13.7 -Dpackaging=aar -Dfile=monsdk-model-release-v1.13.7-rca97747.aar -DpomFile=pom.xml -DrepositoryId=${'$'}1 -Durl=${'$'}2
+
+rc=${'$'}?
+if [[ ${"$"}rc -ne '0' ]] ; then
+  echo 'maven failure';
+else
+  echo 'maven success';
+fi
+
+json="{
+    \"link\": {
+        \"title\": \"智营通demo\",
+        \"text\": \"android有新版本发布啦 快来测试～～ \n\n最新版本: ${"$"}{versionName}\",
+        \"picUrl\": \"https://www.gstatic.cn/devrel-devsite/prod/vf4ca28c48392b1412e7b030290622a0dd55b62dec1202c59f119b1e23227c988/android/images/favicon.png\",
+        \"messageUrl\": \"http://172.31.3.82:8080/apk/${"$"}{apkFileName}\"
+    },
+    \"at\": {
+        \"atMobiles\": [
+            \"15839945391\"
+        ],
+        \"isAtAll\": false
+    },
+    \"msgtype\": \"link\"
+}"
+
+# ios群 https://oapi.dingtalk.com/robot/send?access_token=cebbeb7ffe99ea9aa7b811d5ac0e1b44e44fbb4c2cb42c3d1855e442fa465b9e
+# 测试群 https://oapi.dingtalk.com/robot/send?access_token=39c43f9ee9340b92713e4a9362b0d995f5520e7fb29dd579e3a17e52fb43cb90
+
+
+curl 'https://oapi.dingtalk.com/robot/send?access_token=39c43f9ee9340b92713e4a9362b0d995f5520e7fb29dd579e3a17e52fb43cb90' \
+   -H 'Content-Type: application/json' \
+   -d "${"$"}{json}"
+"""
+    }
 
     private fun writeToFile(distPath: String, filename: String, content: String) {
         val file = File(distPath, filename)

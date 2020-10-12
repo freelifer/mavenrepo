@@ -8,7 +8,7 @@
 #### 1. 在项目下的build.gradle添加代码
 
 ```
-classpath 'freelifer.gradle.plugin:mavenrepo-gradle-plugin:1.0.1'
+classpath 'freelifer.gradle.plugin:mavenrepo-gradle-plugin:1.0.7'
 ```
 
 #### 2. 在module下的build.gradle添加代码
@@ -49,3 +49,4 @@ mavenrepo {
 | 1.0.0 | 2019/06/20 | 初版，基础功能完成，pom.xml和shell脚本命令完成 |
 | 1.0.1 | 2019/06/20 | 支持ignore忽略依赖库，支持compileOnly和provided不打入pom文件中 |
 | 1.0.3 | 2020/02/15 | 支持打snapshot版本 |
+| 1.0.7 | 2020/08/15 | 支持dist字段 |
