@@ -179,6 +179,11 @@ class _MavenRepoPlugin : Plugin<Project> {
             return false
         }
 
+        // fix 如果group为空 忽略打包进入pom文件
+        if (group.isEmpty()) {
+            return true;
+        }
+
         for (d in list) {
             if (d.name.isEmpty()) {
                 if (d.group == group) {
