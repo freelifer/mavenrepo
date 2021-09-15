@@ -5,10 +5,14 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
+import org.gradle.api.publication.maven.internal.deployer.DefaultGroovyMavenDeployer
+import org.gradle.api.publication.maven.internal.pom.DefaultMavenPom
+import org.gradle.api.tasks.Upload
 import java.io.File
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
+import kotlin.collections.arrayListOf as arrayListOf1
 
 private val Project.android: AndroidConfig
     get() {
@@ -25,83 +29,114 @@ private val Project.mavenrepo: MavenRepo
     }
 
 /**
+ *         project.apply([plugin: 'maven-publish'])
  * @author zhukun on 2019-06-28.
  */
 class _MavenRepoPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val mavenrepo = project.mavenrepo
+        if (mavenrepo.mvnPlugin) {
+            // 加载maven插件
+            project.pluginManager.apply("maven")
 
-        val map = HashMap<String, String>()
-        map[Task.TASK_GROUP] = "mavenrepo"
+            // repositories -> DefaultGroovyMavenDeployer
+            // pom -> DefaultMavenPom
+            (((project.tasks.getAt("uploadArchives") as Upload).repositories[0] as DefaultGroovyMavenDeployer).pom).whenConfigured { it ->
+                val pom = (it as DefaultMavenPom)
+                val ignoreDependencies = ignoreDependencies(project)
+                val ignoreExtensions = ignoreExtensions(mavenrepo)
+                val ignore = ArrayList<Dependency>()
+                ignore.addAll(ignoreDependencies)
+                ignore.addAll(ignoreExtensions)
 
-        val upload = project.task(map, "upload")
-        upload.description = "upload maven repo"
-        upload.dependsOn("assembleRelease")
-        upload.doLast {
-            val distFile = File(project.rootDir.path + File.separator + mavenrepo.dist)
-            if (!distFile.exists()) {
-                println("======>>mavenRepoTask upload error, ${distFile.absolutePath} not exists")
-                return@doLast
-            }
-            project.exec {
-                it.workingDir = distFile
-                var commands = ArrayList<String>()
-                if (System.getProperty("os.name").toLowerCase().startsWith("windows")) {
-                    commands.add("cmd")
-                    commands.add("/c")
-                } else {
-                    commands.add("bash")
-                    commands.add("-c")
-                }
-                commands.add("chmod +x maven_upload.sh && ./maven_upload.sh")
-                it.commandLine = commands
-            }
-        }
+                val groupId = mavenrepo.groupId
+                val artifactId = if (isBlank(mavenrepo.artifactId)) project.name else mavenrepo.artifactId
+                val version = if (isBlank(mavenrepo.version)) project.android.defaultConfig.versionName else mavenrepo.version
+                pom.groupId = groupId
+                pom.artifactId = artifactId
+                pom.version = version
 
-        val mavenRepoTask = project.task(map, "mavenrepo").doLast {
-            val startTime = System.currentTimeMillis()
-            if (!verifyParameter(project, mavenrepo)) {
-                println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
-                return@doLast
-            }
-
-            val distPath = project.rootDir.path + File.separator + mavenrepo.dist
-            delDir(distPath)
-
-            val buildPath = project.buildDir.path
-            val aarDir = File(buildPath + File.separator + "outputs" + File.separator + "aar")
-            var arrFilePath = ""
-            var lastModifyMaxTime = 0L
-            if (aarDir.exists()) {
-                val paths = aarDir.listFiles().toList()
-                paths.forEach { file ->
-                    val lastModifyTime = file.lastModified()
-                    if (lastModifyMaxTime < lastModifyTime) {
-                        lastModifyMaxTime = lastModifyTime
-                        arrFilePath = file.absolutePath
+                // 处理 dependencies
+                for (index in pom.dependencies.size - 1 downTo 0) {
+                    val dep = pom.dependencies[index]
+                    if (findModuleFromIgnoreDependencies(ignore, dep.groupId, dep.artifactId)) {
+                        pom.dependencies.removeAt(index)
                     }
                 }
             }
-            if (arrFilePath.isEmpty()) {
-                warn(project, "======>>maven repo not found aar file.")
-                println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
-                return@doLast
+        } else {
+            val map = HashMap<String, String>()
+            map[Task.TASK_GROUP] = "mavenrepo"
+
+            val upload = project.task(map, "upload")
+            upload.description = "upload maven repo"
+            upload.dependsOn("assembleRelease")
+            upload.doLast {
+                val distFile = File(project.rootDir.path + File.separator + mavenrepo.dist)
+                if (!distFile.exists()) {
+                    println("======>>mavenRepoTask upload error, ${distFile.absolutePath} not exists")
+                    return@doLast
+                }
+                project.exec {
+                    it.workingDir = distFile
+                    var commands = ArrayList<String>()
+                    if (System.getProperty("os.name").toLowerCase().startsWith("windows")) {
+                        commands.add("cmd")
+                        commands.add("/c")
+                    } else {
+                        commands.add("bash")
+                        commands.add("-c")
+                    }
+                    commands.add("chmod +x maven_upload.sh && ./maven_upload.sh")
+                    it.commandLine = commands
+                }
             }
 
-            val file = File(arrFilePath)
-            file.copyTo(File(distPath, file.name), true)
+            val mavenRepoTask = project.task(map, "mavenrepo").doLast {
+                val startTime = System.currentTimeMillis()
+                if (!verifyParameter(project, mavenrepo)) {
+                    println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
+                    return@doLast
+                }
 
-            val mappingDir = File(buildPath + File.separator + "outputs" + File.separator + "mapping" + File.separator + "release")
-            copyMapping(mappingDir, File(distPath))
+                val distPath = project.rootDir.path + File.separator + mavenrepo.dist
+                delDir(distPath)
 
-            createPom(project, mavenrepo, distPath, file.name)
+                val buildPath = project.buildDir.path
+                val aarDir = File(buildPath + File.separator + "outputs" + File.separator + "aar")
+                var arrFilePath = ""
+                var lastModifyMaxTime = 0L
+                if (aarDir.exists()) {
+                    val paths = aarDir.listFiles().toList()
+                    paths.forEach { file ->
+                        val lastModifyTime = file.lastModified()
+                        if (lastModifyMaxTime < lastModifyTime) {
+                            lastModifyMaxTime = lastModifyTime
+                            arrFilePath = file.absolutePath
+                        }
+                    }
+                }
+                if (arrFilePath.isEmpty()) {
+                    warn(project, "======>>maven repo not found aar file.")
+                    println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
+                    return@doLast
+                }
 
-            println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
-        }
+                val file = File(arrFilePath)
+                file.copyTo(File(distPath, file.name), true)
 
-        project.tasks.whenTaskAdded {
-            if (it.name == "assembleRelease") {
-                it.finalizedBy(mavenRepoTask)
+                val mappingDir = File(buildPath + File.separator + "outputs" + File.separator + "mapping" + File.separator + "release")
+                copyMapping(mappingDir, File(distPath))
+
+                createPom(project, mavenrepo, distPath, file.name)
+
+                println("======>>mavenRepoTask exec time is ${System.currentTimeMillis() - startTime}ms")
+            }
+
+            project.tasks.whenTaskAdded {
+                if (it.name == "assembleRelease") {
+                    it.finalizedBy(mavenRepoTask)
+                }
             }
         }
     }
@@ -420,6 +455,10 @@ curl 'https://oapi.dingtalk.com/robot/send?access_token=39c43f9ee9340b92713e4a93
 open class Dependency(var group: String, var name: String)
 
 open class MavenRepo {
+    /**
+     * 启用gradle 自带 maven 插件上传aar
+     */
+    var mvnPlugin: Boolean = false
     var groupId: String = ""
     var artifactId: String = ""
     var version: String = ""
