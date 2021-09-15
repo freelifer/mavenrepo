@@ -13,6 +13,8 @@ gradlePlugin {
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
     implementation "com.android.tools.build:gradle:$build_gradle_version"
+//    implementation gradleApi()
+//    implementation localGroovy()
     testImplementation 'junit:junit:4.11'
 }
 
@@ -44,4 +46,5 @@ uploadArchives {
 }
 
 //-----------
-apply from: rootProject.file('gradle/bintray1.gradle')
+//apply from: rootProject.file('gradle/bintray1.gradle')
+apply from: rootProject.file('gradle/gradle-mvn-push.gradle')
