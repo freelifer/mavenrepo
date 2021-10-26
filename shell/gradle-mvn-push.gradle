@@ -1,0 +1,247 @@
+apply plugin: 'maven'
+
+ext["authUsername"] = ''
+ext["authPassword"] = ''
+
+File secretPropsFile = project.rootProject.file('local.properties')
+if (secretPropsFile.exists()) {
+    println "Found secret props file, loading props"
+    Properties p = new Properties()
+    p.load(new FileInputStream(secretPropsFile))
+    p.each { name, value ->
+        ext[name] = value
+    }
+} else {
+    println "No props file, loading env vars"
+}
+afterEvaluate { project ->
+    uploadArchives {
+        repositories {
+            mavenDeployer {
+                repository(url: RELEASE_REPOSITORY_URL) {
+                    authentication(userName: authUsername, password: authPassword)
+                }
+                snapshotRepository(url: SNAPSHOT_REPOSITORY_URL) {
+                    authentication(userName: authUsername, password: authPassword)
+                }
+
+                configurePom(pom)
+            }
+        }
+    }
+
+    tasks.create("installLocally", Upload) {
+        configuration = configurations.archives
+
+        repositories {
+            mavenDeployer {
+                repository(url: "file://${rootProject.buildDir}/localMaven")
+
+                configurePom(pom)
+            }
+        }
+    }
+
+    if (project.getPlugins().hasPlugin('com.android.application') ||
+            project.getPlugins().hasPlugin('com.android.library')) {
+        task install(type: Upload, dependsOn: assemble) {
+            repositories.mavenInstaller {
+                configuration = configurations.archives
+
+                configurePom(pom)
+            }
+        }
+
+        task androidJavadocs(type: Javadoc) {
+            source = android.sourceSets.main.java.source
+            classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
+        }
+
+        task androidJavadocsJar(type: Jar, dependsOn: androidJavadocs) {
+            classifier = 'javadoc'
+            from androidJavadocs.destinationDir
+        }
+
+        task androidSourcesJar(type: Jar) {
+            classifier = 'sources'
+            from android.sourceSets.main.java.source
+        }
+    } else {
+        install {
+            repositories.mavenInstaller {
+                configurePom(pom)
+            }
+        }
+
+        task sourcesJar(type: Jar, dependsOn:classes) {
+            classifier = 'sources'
+            from sourceSets.main.allSource
+        }
+
+        task javadocJar(type: Jar, dependsOn:javadoc) {
+            classifier = 'javadoc'
+            from javadoc.destinationDir
+        }
+    }
+
+    if (JavaVersion.current().isJava8Compatible()) {
+        allprojects {
+            tasks.withType(Javadoc) {//防止编码问题
+                enabled = false
+                options.addStringOption('Xdoclint:none', '-quiet')
+                options.addStringOption('encoding', 'UTF-8')
+                options.addStringOption('charSet', 'UTF-8')
+            }
+        }
+    }
+
+    artifacts {
+        if (project.getPlugins().hasPlugin('com.android.application') ||
+                project.getPlugins().hasPlugin('com.android.library')) {
+            archives androidSourcesJar
+            archives androidJavadocsJar
+        } else {
+            archives sourcesJar
+            archives javadocJar
+        }
+    }
+}
+
+def configurePom(pom) {
+    String pomVersion = project.properties.get("POM_VERSION")
+    if (pomVersion == null) {
+        if (project.getPlugins().hasPlugin('com.android.application') ||
+                project.getPlugins().hasPlugin('com.android.library')) {
+            pomVersion = android.defaultConfig.versionName
+        } else {
+            throw new RuntimeException("please add POM_VERSION on gradle.properties file")
+        }
+    }
+    String pomArtifactId = project.properties.get("POM_ARTIFACT_ID")
+    if (pomArtifactId == null) {
+        pomArtifactId = project.name
+    }
+
+    String pomPackaging = project.properties.get('POM_PACKAGING')
+    if (pomPackaging == null) {
+        pomPackaging = "aar"
+    }
+    pom.groupId = POM_GROUP_ID
+    pom.artifactId = pomArtifactId
+    pom.version = pomVersion
+
+    pom.project {
+        name POM_NAME
+        packaging pomPackaging
+//        description POM_DESCRIPTION
+//        url POM_URL
+
+//        scm {
+//            url POM_SCM_URL
+//            connection POM_SCM_CONNECTION
+//            developerConnection POM_SCM_DEV_CONNECTION
+//        }
+//
+//        licenses {
+//            license {
+//                name POM_LICENCE_NAME
+//                url POM_LICENCE_URL
+//                distribution POM_LICENCE_DIST
+//            }
+//        }
+//
+//        developers {
+//            developer {
+//                id POM_DEVELOPER_ID
+//                name POM_DEVELOPER_NAME
+//            }
+//        }
+    }
+
+    pom.whenConfigured { mavenPom ->
+        // 读取忽略列表
+        def ignoreDeps = findIgnoreDependencies()
+        println('whenConfigured ignoreDeps ' + ignoreDeps)
+        def deps = mavenPom.dependencies
+        mavenPom.dependencies = []
+        project.configurations.all { configuration ->
+            def name = configuration.name
+            if (name != "implementation" && name != "compile" && name != "api") {
+                return
+            }
+//            println('==>>> ' + configuration)
+            configuration.dependencies.each {
+                if (it.name == "unspecified" || it.version == 'unspecified') {
+                    // 忽略无法识别的
+                    return
+                }
+                if (it instanceof ProjectDependency) {
+                    return
+                }
+                def temp = isIgnoreDependency(ignoreDeps, it.group, it.name)
+//                println(name + " " + it.group + " " + it.name + " " + it.version + " " + temp)
+                if (!isIgnoreDependency(ignoreDeps, it.group, it.name)) {
+                    for (def dep : deps) {
+                        if (it.group == dep.groupId && it.name == dep.artifactId) {
+                            mavenPom.dependencies.add(dep)
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+
+        println('whenConfigured after old:' + deps.size + " new:" + mavenPom.dependencies.size)
+    }
+}
+
+def findIgnoreDependencies() {
+    // 读取忽略列表
+    String pomDepsIgnore = project.properties.get("POM_DEPS_IGNORE")
+    def ignoreDeps = []
+    if (pomDepsIgnore != null && !pomDepsIgnore.isEmpty()) {
+        def splits = pomDepsIgnore.split(',')
+        if (splits != null) {
+            splits.each { split ->
+                def trim = split.trim()
+                def splits_1 = trim.split(":")
+                String[] result = new String[2]
+                if (splits_1.length == 1) {
+                    if (splits_1[0].length() > 0) {
+                        result[0] = splits_1[0]
+                        result[1] = ""
+                        ignoreDeps.add(result)
+                    }
+                } else if (splits_1.length > 1) {
+                    result[0] = splits_1[0]
+                    result[1] = splits_1[1]
+                    ignoreDeps.add(result)
+                }
+//                println("trim " + splits_1 + " " + splits_1.length)
+            }
+        }
+    }
+    return ignoreDeps
+}
+
+def isIgnoreDependency(ArrayList<String[]> ignoreDeps, String groupId, String name) {
+    if (ignoreDeps == null) {
+        return false
+    }
+
+    for (String[] dep : ignoreDeps) {
+        if (dep[0].length() > 0) {
+            if (groupId != dep[0]) {
+                continue
+            }
+        }
+        if (dep[1].length() > 0) {
+            if (name != dep[1]) {
+                continue
+            }
+        }
+        return true
+    }
+    return false
+}

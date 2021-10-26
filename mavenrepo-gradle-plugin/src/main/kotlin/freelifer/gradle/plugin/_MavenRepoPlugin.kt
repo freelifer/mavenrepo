@@ -5,14 +5,16 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
-import org.gradle.api.publication.maven.internal.deployer.DefaultGroovyMavenDeployer
+import org.gradle.api.artifacts.maven.MavenResolver
+import org.gradle.api.plugins.MavenPlugin
 import org.gradle.api.publication.maven.internal.pom.DefaultMavenPom
 import org.gradle.api.tasks.Upload
 import java.io.File
 import java.util.*
+import java.util.regex.Pattern
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
-import kotlin.collections.arrayListOf as arrayListOf1
+
 
 private val Project.android: AndroidConfig
     get() {
@@ -33,37 +35,107 @@ private val Project.mavenrepo: MavenRepo
  * @author zhukun on 2019-06-28.
  */
 class _MavenRepoPlugin : Plugin<Project> {
+//
+//    private lateinit var loggingManagerFactory: Factory<LoggingManagerInternal>
+//    private lateinit var fileResolver: FileResolver
+//    private lateinit var publicationRegistry: ProjectPublicationRegistry
+//    private lateinit var configurationActionContainer: ProjectConfigurationActionContainer
+//    private lateinit var mavenSettingsProvider: MavenSettingsProvider
+//    private lateinit var mavenRepositoryLocator: LocalMavenRepositoryLocator
+//    private lateinit var moduleIdentifierFactory: ImmutableModuleIdentifierFactory
+//
+//    private val project: Project? = null
+//
+//    @Inject
+//    fun _MavenRepoPlugin(loggingManagerFactory: Factory<LoggingManagerInternal>, fileResolver: FileResolver,
+//                           publicationRegistry: ProjectPublicationRegistry, configurationActionContainer: ProjectConfigurationActionContainer,
+//                           mavenSettingsProvider: MavenSettingsProvider, mavenRepositoryLocator: LocalMavenRepositoryLocator,
+//                           moduleIdentifierFactory: ImmutableModuleIdentifierFactory) {
+//        println("======>>mavenRepoTask _MavenRepoPlugin 初始化")
+//        this.loggingManagerFactory = loggingManagerFactory
+//        this.fileResolver = fileResolver
+//        this.publicationRegistry = publicationRegistry
+//        this.configurationActionContainer = configurationActionContainer
+//        this.mavenSettingsProvider = mavenSettingsProvider
+//        this.mavenRepositoryLocator = mavenRepositoryLocator
+//        this.moduleIdentifierFactory = moduleIdentifierFactory
+//    }
+
     override fun apply(project: Project) {
         val mavenrepo = project.mavenrepo
+        println("======>>mavenRepoTask project.mavenrepo, ${mavenrepo.mvnPlugin}")
         if (mavenrepo.mvnPlugin) {
             // 加载maven插件
-            project.pluginManager.apply("maven")
+            project.pluginManager.apply(MavenPlugin::class.java)
 
-            // repositories -> DefaultGroovyMavenDeployer
-            // pom -> DefaultMavenPom
-            (((project.tasks.getAt("uploadArchives") as Upload).repositories[0] as DefaultGroovyMavenDeployer).pom).whenConfigured { it ->
-                val pom = (it as DefaultMavenPom)
-                val ignoreDependencies = ignoreDependencies(project)
-                val ignoreExtensions = ignoreExtensions(mavenrepo)
-                val ignore = ArrayList<Dependency>()
-                ignore.addAll(ignoreDependencies)
-                ignore.addAll(ignoreExtensions)
+            project.tasks.withType(Upload::class.java) { upload ->
+                println("======>>mavenRepoTask project.tasks.withType ${upload.repositories}")
+                val repositories = upload.repositories
+                val resolver = repositories.withType(MavenResolver::class.java)[0]
+//                val pom = resolver.pom
+                resolver.pom.whenConfigured { it ->
+                    val pom = (it as DefaultMavenPom)
+                    val ignoreDependencies = ignoreDependencies(project)
+                    val ignoreExtensions = ignoreExtensions(mavenrepo)
+                    val ignore = ArrayList<Dependency>()
+                    ignore.addAll(ignoreDependencies)
+                    ignore.addAll(ignoreExtensions)
 
-                val groupId = mavenrepo.groupId
-                val artifactId = if (isBlank(mavenrepo.artifactId)) project.name else mavenrepo.artifactId
-                val version = if (isBlank(mavenrepo.version)) project.android.defaultConfig.versionName else mavenrepo.version
-                pom.groupId = groupId
-                pom.artifactId = artifactId
-                pom.version = version
+                    val groupId = mavenrepo.groupId
+                    val artifactId = if (isBlank(mavenrepo.artifactId)) project.name else mavenrepo.artifactId
+                    val version = if (isBlank(mavenrepo.version)) project.android.defaultConfig.versionName else mavenrepo.version
+                    pom.groupId = groupId
+                    pom.artifactId = artifactId
+                    pom.version = version
 
-                // 处理 dependencies
-                for (index in pom.dependencies.size - 1 downTo 0) {
-                    val dep = pom.dependencies[index]
-                    if (findModuleFromIgnoreDependencies(ignore, dep.groupId, dep.artifactId)) {
-                        pom.dependencies.removeAt(index)
+                    var a = false
+                    // 处理 dependencies
+                    for (index in pom.dependencies.size - 1 downTo 0) {
+                        val dep : Any = pom.dependencies[index]
+                        val depStr = dep.toString()
+                        println("======>>mavenRepoTask pom.dependencies ${depStr}")
+                        //        String dependency = "Dependency {groupId=ad-sdk-android, artifactId=sdk_bd-sdk-v9.14.2, version=9.14.2, type=null}";
+                        val pattern = Pattern.compile("Dependency \\{groupId=([\\w.-]+), artifactId=([\\w-_\\d.]+), version=([\\w\\d.-]+), ")
+                        val matcher = pattern.matcher(depStr)
+
+                        if (matcher.find() && matcher.groupCount() == 3) {
+                            if (findModuleFromIgnoreDependencies(ignore, matcher.group(1), matcher.group(2))) {
+                                pom.dependencies.removeAt(index)
+                            }
+                        } else {
+                            pom.dependencies.removeAt(index)
+                        }
                     }
                 }
+
+//                val repositoryConvention = DefaultMavenRepositoryHandlerConvention(handler, deployerFactory)
+//                DslObject(repositories).convention.plugins["maven"] = repositoryConvention
             }
+            // repositories -> DefaultGroovyMavenDeployer
+            // pom -> DefaultMavenPom
+//            (((project.tasks.getAt("uploadArchives") as Upload).repositories[0] as DefaultGroovyMavenDeployer).pom).whenConfigured { it ->
+//                val pom = (it as DefaultMavenPom)
+//                val ignoreDependencies = ignoreDependencies(project)
+//                val ignoreExtensions = ignoreExtensions(mavenrepo)
+//                val ignore = ArrayList<Dependency>()
+//                ignore.addAll(ignoreDependencies)
+//                ignore.addAll(ignoreExtensions)
+//
+//                val groupId = mavenrepo.groupId
+//                val artifactId = if (isBlank(mavenrepo.artifactId)) project.name else mavenrepo.artifactId
+//                val version = if (isBlank(mavenrepo.version)) project.android.defaultConfig.versionName else mavenrepo.version
+//                pom.groupId = groupId
+//                pom.artifactId = artifactId
+//                pom.version = version
+//
+//                // 处理 dependencies
+//                for (index in pom.dependencies.size - 1 downTo 0) {
+//                    val dep = pom.dependencies[index]
+//                    if (findModuleFromIgnoreDependencies(ignore, dep.groupId, dep.artifactId)) {
+//                        pom.dependencies.removeAt(index)
+//                    }
+//                }
+//            }
         } else {
             val map = HashMap<String, String>()
             map[Task.TASK_GROUP] = "mavenrepo"
