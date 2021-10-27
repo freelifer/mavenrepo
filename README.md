@@ -29,7 +29,11 @@ authPassword=xxxxxxx
 #### 3. 在需要集成打包服务的module下的build.gradle添加插件依赖
 
 ```
-apply from: 'https://gitee.com/freelifer/android/raw/master/gradle-mvn-push.gradle'
+// gitee地址
+apply from: 'https://gitee.com/freelifer/mavenrepo/raw/master/shell/2.0.0/gradle-mvn-push.gradle'
+
+// github地址
+apply from: 'https://raw.githubusercontent.com/freelifer/mavenrepo/master/shell/2.0.0/gradle-mvn-push.gradle'
 ```
 
 #### 4. 在需要集成打包服务module目录下的gradle.properties，配置当前sdk的信息
