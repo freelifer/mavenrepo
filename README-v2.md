@@ -2,7 +2,7 @@
 
 > 用于aar或jar上传到maven仓库
 
-v3版本已上线，使用'maven-publish'插件, 利用gradle脚本，通过简单配置实现aar或jar的maven仓库上传，[v1版本入口地址](./README-v1.md)，[v2版本入口地址](./README-v2.md)
+v2版本已上线，利用gradle脚本，通过简单配置实现aar或jar的maven仓库上传，[v1版本入口地址](./README-v1.md)
 
 ## 接入手册
 
@@ -30,10 +30,10 @@ authPassword=xxxxxxx
 
 ```
 // gitee地址
-apply from: 'https://gitee.com/freelifer/mavenrepo/raw/master/shell/3.0.0/gradle-mvn-push.gradle'
+apply from: 'https://gitee.com/freelifer/mavenrepo/raw/master/shell/2.0.0/gradle-mvn-push.gradle'
 
 // github地址
-apply from: 'https://raw.githubusercontent.com/freelifer/mavenrepo/master/shell/3.0.0/gradle-mvn-push.gradle'
+apply from: 'https://raw.githubusercontent.com/freelifer/mavenrepo/master/shell/2.0.0/gradle-mvn-push.gradle'
 ```
 
 #### 4. 在需要集成打包服务module目录下的gradle.properties，配置当前sdk的信息
@@ -65,10 +65,10 @@ POM_DEPS_IGNORE=androidx.appcompat,com.android.support
 
 ```
 # mac
-./gradlew :sdk:upload
+./gradlew :sdk:uploadArchives
 
 # window
-gradlew.bat :sdk:upload
+gradlew.bat :sdk:uploadArchives
 
 ```
 
@@ -76,5 +76,4 @@ gradlew.bat :sdk:upload
 
 | 插件版本 | 修订日期 | 修订说明 |
 | ------------ | ------------ | ------------ |
-| 3.0.0 | 2023/05/06 | 使用maven-publish插件上传 |
 | 2.0.0 | 2021/10/27 | 新版本库上传maven发布 |
